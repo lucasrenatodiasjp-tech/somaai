@@ -4,6 +4,7 @@ import {
   PieChart as PieChartIcon, 
   Plus, 
   Trash2, 
+  Edit2,
   TrendingUp, 
   Target, 
   Layers, 
@@ -14,7 +15,8 @@ import {
   Info,
   RefreshCw,
   Settings2,
-  X
+  X,
+  Search
 } from 'lucide-react';
 import { Asset, AssetCategory, DEFAULT_ASSET_CATEGORIES } from '../types';
 import { cn, formatCurrency, formatPercent } from '../lib/utils';
@@ -41,8 +43,10 @@ export default function PortfolioManager({
 }: PortfolioManagerProps) {
   const [newAporte, setNewAporte] = useState<string>('4000');
   const [showAddAsset, setShowAddAsset] = useState(false);
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [showManageCategories, setShowManageCategories] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isFetchingPrice, setIsFetchingPrice] = useState(false);
   
   // New Asset Form State
   const [newType, setNewType] = useState(assetCategories[0]?.name || '');
@@ -51,6 +55,30 @@ export default function PortfolioManager({
   const [newQuantity, setNewQuantity] = useState('');
   const [newNote, setNewNote] = useState<Asset['note']>(5);
   const [newPyramid, setNewPyramid] = useState<Asset['pyramid']>('MEIO');
+
+  // Mock price fetcher
+  const fetchPrice = async (ticker: string) => {
+    if (!ticker) return null;
+    setIsFetchingPrice(true);
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Deterministic mock price based on ticker string
+    let hash = 0;
+    for (let i = 0; i < ticker.length; i++) {
+      hash = ticker.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const price = Math.abs((hash % 200) + 10) + (Math.random() * 2);
+    setIsFetchingPrice(false);
+    return price;
+  };
+
+  const handleTickerBlur = async () => {
+    if (newTicker && !newPrice) {
+      const price = await fetchPrice(newTicker);
+      if (price) setNewPrice(price.toFixed(2));
+    }
+  };
 
   // Manage Categories State
   const [newCatName, setNewCatName] = useState('');
@@ -79,12 +107,20 @@ export default function PortfolioManager({
 
     const initialAllocations = assets.map(asset => {
       const cat = assetCategories.find(c => c.name === asset.type);
-      const catTotalNotes = assets
-        .filter(a => a.type === asset.type)
-        .reduce((acc, a) => acc + a.note, 0);
+      
+      // Calculate weight based on Note and Pyramid
+      // BASE gets 2x weight, MEIO 1x, TOPO 0.5x
+      const pyramidMultiplier = asset.pyramid === 'BASE' ? 2.0 : asset.pyramid === 'TOPO' ? 0.5 : 1.0;
+      const assetWeight = asset.note * pyramidMultiplier;
+
+      const catAssets = assets.filter(a => a.type === asset.type);
+      const catTotalWeights = catAssets.reduce((acc, a) => {
+        const m = a.pyramid === 'BASE' ? 2.0 : a.pyramid === 'TOPO' ? 0.5 : 1.0;
+        return acc + (a.note * m);
+      }, 0);
       
       const catTargetAporte = (aporteBrutoVal * (cat?.target || 0)) / 100;
-      const assetAporteBruto = catTotalNotes > 0 ? (asset.note / catTotalNotes) * catTargetAporte : 0;
+      const assetAporteBruto = catTotalWeights > 0 ? (assetWeight / catTotalWeights) * catTargetAporte : 0;
       
       const price = asset.price;
       const isInteger = asset.type === 'Ações Nacionais' || asset.type === 'Fundos Imobiliários';
@@ -111,7 +147,7 @@ export default function PortfolioManager({
 
     const fractionalAssets = initialAllocations.filter(a => !a.isInteger && a.initialSpent > 0);
     const totalFractionalWeights = fractionalAssets.reduce((acc, a) => {
-      const multiplier = a.pyramid === 'BASE' ? 1.5 : a.pyramid === 'TOPO' ? 0.5 : 1;
+      const multiplier = a.pyramid === 'BASE' ? 2.0 : a.pyramid === 'TOPO' ? 0.5 : 1;
       return acc + (a.note * multiplier);
     }, 0);
 
@@ -120,7 +156,7 @@ export default function PortfolioManager({
       let finalSpent = a.initialSpent;
 
       if (!a.isInteger && a.initialSpent > 0 && totalFractionalWeights > 0) {
-        const multiplier = a.pyramid === 'BASE' ? 1.5 : a.pyramid === 'TOPO' ? 0.5 : 1;
+        const multiplier = a.pyramid === 'BASE' ? 2.0 : a.pyramid === 'TOPO' ? 0.5 : 1;
         const weight = a.note * multiplier;
         const extraMoney = trocoGlobal * (weight / totalFractionalWeights);
         finalSpent += extraMoney;
@@ -139,9 +175,14 @@ export default function PortfolioManager({
     });
   }, [assets, assetCategories, newAporte]);
 
-  const addAsset = () => {
-    if (!newTicker || !newPrice || !newQuantity) return;
-    const price = parseFloat(newPrice);
+  const addAsset = async () => {
+    let price = parseFloat(newPrice);
+    if (!price && newTicker) {
+      const fetched = await fetchPrice(newTicker);
+      if (fetched) price = fetched;
+    }
+    if (!newTicker || !price || !newQuantity) return;
+    
     const quantity = parseFloat(newQuantity);
     const asset: Asset = {
       id: crypto.randomUUID(),
@@ -158,6 +199,15 @@ export default function PortfolioManager({
     setNewPrice('');
     setNewQuantity('');
     setShowAddAsset(false);
+  };
+
+  const updateAsset = () => {
+    if (!editingAsset) return;
+    setAssets(prev => prev.map(a => a.id === editingAsset.id ? {
+      ...editingAsset,
+      position: editingAsset.price * editingAsset.quantity
+    } : a));
+    setEditingAsset(null);
   };
 
   const removeAsset = (id: string) => {
@@ -203,52 +253,52 @@ export default function PortfolioManager({
   return (
     <div className="flex flex-col gap-8">
       {/* Header & Targets */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 glass p-6 rounded-3xl flex flex-col gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <div className="xl:col-span-7 glass p-8 rounded-3xl flex flex-col gap-8">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg">
-                <PieChartIcon size={20} />
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-xl">
+                <PieChartIcon size={24} />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-slate-800">Distribuição de Carteira</h2>
-                <p className="text-xs text-slate-500 font-medium">Balanceamento inteligente baseado em notas e metas</p>
+                <h2 className="text-xl font-bold text-slate-800">Distribuição de Carteira</h2>
+                <p className="text-sm text-slate-500 font-medium">Balanceamento inteligente baseado em notas e metas</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={refreshPrices}
                 disabled={isRefreshing}
-                className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all disabled:opacity-50"
+                className="p-3 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all disabled:opacity-50"
                 title="Atualizar Preços"
               >
                 <RefreshCw size={20} className={cn(isRefreshing && "animate-spin")} />
               </button>
               <button
                 onClick={() => setShowManageCategories(true)}
-                className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+                className="p-3 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
                 title="Gerenciar Categorias"
               >
                 <Settings2 size={20} />
               </button>
-              <div className="text-right ml-4">
+              <div className="text-right ml-6">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Investido</p>
-                <h3 className="text-xl font-black text-indigo-600">{formatCurrency(totalInvested)}</h3>
+                <h3 className="text-2xl font-black text-indigo-600">{formatCurrency(totalInvested)}</h3>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="h-[200px] w-full">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+            <div className="h-[280px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={categoryStats.filter(c => c.currentPosition > 0)}
                     cx="50%"
                     cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
+                    innerRadius={80}
+                    outerRadius={110}
+                    paddingAngle={8}
                     dataKey="currentPosition"
                   >
                     {categoryStats.map((entry, index) => (
@@ -266,13 +316,16 @@ export default function PortfolioManager({
               </ResponsiveContainer>
             </div>
 
-            <div className="flex flex-col gap-3 overflow-y-auto max-h-[200px] pr-2">
+            <div className="flex flex-col gap-4 overflow-y-auto max-h-[500px] pr-4 custom-scrollbar">
               {categoryStats.map((cat, idx) => (
-                <div key={cat.name} className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-700">{cat.name}</span>
+                <div key={cat.name} className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
-                      <span className="text-slate-400">Meta: {formatPercent(cat.target)}</span>
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: idx % 6 === 0 ? '#6366f1' : idx % 6 === 1 ? '#10b981' : idx % 6 === 2 ? '#f59e0b' : idx % 6 === 3 ? '#ef4444' : idx % 6 === 4 ? '#8b5cf6' : '#06b6d4' }} />
+                      <span className="font-bold text-slate-700">{cat.name}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-slate-400 text-xs">Meta: {formatPercent(cat.target)}</span>
                       <span className={cn(
                         "font-black",
                         cat.diff > 2 ? "text-rose-500" : cat.diff < -2 ? "text-amber-500" : "text-emerald-500"
@@ -281,9 +334,9 @@ export default function PortfolioManager({
                       </span>
                     </div>
                   </div>
-                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                     <div 
-                      className="h-full bg-indigo-500 rounded-full" 
+                      className="h-full bg-indigo-500 rounded-full transition-all duration-500" 
                       style={{ width: `${cat.currentPercent}%` }}
                     />
                   </div>
@@ -293,44 +346,68 @@ export default function PortfolioManager({
           </div>
         </div>
 
-        <div className="glass p-6 rounded-3xl flex flex-col gap-6 bg-indigo-50/30 border-indigo-100">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="text-indigo-600" size={20} />
-            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-widest">Novo Aporte</h3>
+        <div className="xl:col-span-5 glass p-8 rounded-3xl flex flex-col gap-8 bg-indigo-50/30 border-indigo-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <TrendingUp className="text-indigo-600" size={24} />
+              <h3 className="text-lg font-bold text-slate-800 uppercase tracking-widest">Novo Aporte</h3>
+            </div>
+            <div className="px-4 py-1.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-black">
+              Sugestão Inteligente
+            </div>
           </div>
           
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-slate-500 ml-1">Valor do Aporte (R$)</label>
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold text-slate-500 ml-1">Valor Total para Investir (R$)</label>
               <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                 <input
                   type="number"
                   value={newAporte}
                   onChange={e => setNewAporte(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 rounded-2xl bg-white border border-slate-200 focus:border-indigo-500 outline-none transition-all font-black text-xl text-slate-800 shadow-sm"
+                  className="w-full pl-12 pr-6 py-4 rounded-2xl bg-white border border-slate-200 focus:border-indigo-500 outline-none transition-all font-black text-2xl text-slate-800 shadow-sm"
                 />
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 mt-2">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sugestão de Distribuição</p>
-              <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-2">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Onde Aportar Agora</p>
+                <span className="text-[10px] text-slate-400 font-medium">Ordenado por prioridade</span>
+              </div>
+              <div className="flex flex-col gap-3 min-h-[400px] max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                 {distribution.length > 0 ? distribution.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 shadow-sm">
-                    <div className="flex flex-col">
-                      <span className="text-xs font-black text-slate-800">{item.ticker}</span>
-                      <span className="text-[10px] text-slate-400 font-medium">{item.type}</span>
+                  <motion.div 
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.05 }}
+                    key={idx} 
+                    className="flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all group"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
+                        <Target size={20} />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-black text-slate-800">{item.ticker}</span>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{item.type}</span>
+                      </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs font-black text-indigo-600">{formatCurrency(item.total)}</p>
-                      <p className="text-[10px] text-slate-400 font-bold">{item.units} unids</p>
+                      <p className="text-lg font-black text-indigo-600">{formatCurrency(item.total)}</p>
+                      <p className="text-xs text-slate-400 font-bold">{item.units} unidades</p>
                     </div>
-                  </div>
+                  </motion.div>
                 )) : (
-                  <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2">
-                    <Info size={24} />
-                    <p className="text-xs font-medium">Adicione ativos para ver a sugestão</p>
+                  <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
+                    <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center">
+                      <Info size={32} />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-bold text-slate-600">Nenhuma sugestão disponível</p>
+                      <p className="text-xs font-medium">Adicione ativos e defina um valor de aporte</p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -393,21 +470,36 @@ export default function PortfolioManager({
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className={cn(
-                      "px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider",
-                      asset.pyramid === 'BASE' ? "bg-emerald-100 text-emerald-700" :
-                      asset.pyramid === 'TOPO' ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"
-                    )}>
-                      {asset.pyramid}
-                    </span>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className={cn(
+                        "px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider",
+                        asset.pyramid === 'BASE' ? "bg-emerald-100 text-emerald-700" :
+                        asset.pyramid === 'TOPO' ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"
+                      )}>
+                        {asset.pyramid}
+                      </span>
+                      {asset.pyramid === 'BASE' && (
+                        <span className="text-[8px] font-bold text-emerald-600 uppercase">+ Peso</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 rounded-r-2xl text-right">
-                    <button
-                      onClick={() => removeAsset(asset.id)}
-                      className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => setEditingAsset(asset)}
+                        className="p-2 text-slate-400 hover:text-indigo-600 transition-colors"
+                        title="Editar Ativo"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() => removeAsset(asset.id)}
+                        className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
+                        title="Excluir Ativo"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -459,22 +551,19 @@ export default function PortfolioManager({
                         placeholder="Ex: ITSA4"
                         value={newTicker}
                         onChange={e => setNewTicker(e.target.value)}
+                        onBlur={handleTickerBlur}
                         className="flex-1 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm"
                       />
                       <button
                         onClick={async () => {
-                          if (!newTicker) return;
-                          setIsRefreshing(true);
-                          // Mock fetch for individual ticker
-                          await new Promise(resolve => setTimeout(resolve, 800));
-                          const mockPrice = 10 + Math.random() * 90;
-                          setNewPrice(mockPrice.toFixed(2));
-                          setIsRefreshing(false);
+                          const price = await fetchPrice(newTicker);
+                          if (price) setNewPrice(price.toFixed(2));
                         }}
-                        className="p-3 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+                        disabled={isFetchingPrice || !newTicker}
+                        className="p-3 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all disabled:opacity-50"
                         title="Buscar Preço"
                       >
-                        <RefreshCw size={18} className={cn(isRefreshing && "animate-spin")} />
+                        <Search size={18} className={cn(isFetchingPrice && "animate-pulse")} />
                       </button>
                     </div>
                   </div>
@@ -495,13 +584,24 @@ export default function PortfolioManager({
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Preço Atual (R$)</label>
-                    <input
-                      type="number"
-                      placeholder="0,00"
-                      value={newPrice}
-                      onChange={e => setNewPrice(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm"
-                    />
+                    <div className="relative">
+                      <input
+                        type="number"
+                        placeholder={isFetchingPrice ? "Buscando..." : "Automático"}
+                        value={newPrice}
+                        onChange={e => setNewPrice(e.target.value)}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm",
+                          !newPrice && "italic text-slate-400"
+                        )}
+                      />
+                      {isFetchingPrice && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <RefreshCw size={14} className="animate-spin text-indigo-500" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-slate-400 ml-1 italic">Deixe vazio para buscar automaticamente</p>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Quantidade</label>
@@ -545,7 +645,102 @@ export default function PortfolioManager({
         )}
       </AnimatePresence>
 
-      {/* Manage Categories Modal */}
+      {/* Edit Asset Modal */}
+      <AnimatePresence>
+        {editingAsset && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="glass w-full max-w-md rounded-3xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-slate-800">Editar {editingAsset.ticker}</h3>
+                <button 
+                  onClick={() => setEditingAsset(null)}
+                  className="p-2 rounded-full hover:bg-slate-100 text-slate-400 transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-6 flex flex-col gap-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Preço (R$)</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        value={editingAsset.price}
+                        onChange={e => setEditingAsset({ ...editingAsset, price: parseFloat(e.target.value) })}
+                        className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm"
+                      />
+                      <button
+                        onClick={async () => {
+                          const price = await fetchPrice(editingAsset.ticker);
+                          if (price) setEditingAsset({ ...editingAsset, price });
+                        }}
+                        disabled={isFetchingPrice}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 transition-all"
+                      >
+                        <RefreshCw size={14} className={cn(isFetchingPrice && "animate-spin")} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Quantidade</label>
+                    <input
+                      type="number"
+                      value={editingAsset.quantity}
+                      onChange={e => setEditingAsset({ ...editingAsset, quantity: parseFloat(e.target.value) })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Nota</label>
+                  <select
+                    value={editingAsset.note}
+                    onChange={e => setEditingAsset({ ...editingAsset, note: parseInt(e.target.value) as Asset['note'] })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm"
+                  >
+                    {[0, 1, 3, 5, 7, 9, 11].map(n => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Pirâmide</label>
+                  <div className="flex p-1 bg-slate-100 rounded-xl">
+                    {['BASE', 'MEIO', 'TOPO'].map(p => (
+                      <button
+                        key={p}
+                        onClick={() => setEditingAsset({ ...editingAsset, pyramid: p as Asset['pyramid'] })}
+                        className={cn(
+                          "flex-1 py-2 rounded-lg text-[10px] font-black transition-all",
+                          editingAsset.pyramid === p ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500"
+                        )}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={updateAsset}
+                  className="w-full py-4 mt-2 rounded-2xl bg-indigo-600 text-white font-black text-sm hover:bg-indigo-700 transition-all active:scale-95 shadow-lg shadow-indigo-100"
+                >
+                  Salvar Alterações
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {showManageCategories && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
