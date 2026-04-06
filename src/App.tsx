@@ -11,8 +11,7 @@ import {
   ChevronRight,
   Undo2,
   Trash2,
-  PieChart as PieChartIcon,
-  Calculator
+  PieChart as PieChartIcon
 } from 'lucide-react';
 import { 
   BudgetMode, 
@@ -23,7 +22,6 @@ import {
   AnnualBudget,
   Asset,
   AssetCategory,
-  TaxSettings,
   DEFAULT_ASSET_CATEGORIES
 } from './types';
 import { cn, formatCurrency, formatPercent } from './lib/utils';
@@ -34,12 +32,11 @@ import { ptBR } from 'date-fns/locale';
 import Dashboard from './components/Dashboard';
 import MonthlyView from './components/MonthlyView';
 import CategorySettings from './components/CategorySettings';
-import TaxCalculator from './components/TaxCalculator';
 import PortfolioManager from './components/PortfolioManager';
 
 export default function App() {
   const [mode] = useState<BudgetMode>('domestic');
-  const [view, setView] = useState<'annual' | 'monthly' | 'settings' | 'tax' | 'portfolio'>('annual');
+  const [view, setView] = useState<'annual' | 'monthly' | 'settings' | 'portfolio'>('annual');
   const [categories, setCategories] = useState<Category[]>(() => {
     const saved = localStorage.getItem('mindful_categories');
     return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
@@ -51,20 +48,6 @@ export default function App() {
   const [assetCategories, setAssetCategories] = useState<AssetCategory[]>(() => {
     const saved = localStorage.getItem('mindful_asset_categories');
     return saved ? JSON.parse(saved) : DEFAULT_ASSET_CATEGORIES;
-  });
-  const [taxSettings, setTaxSettings] = useState<TaxSettings>(() => {
-    const saved = localStorage.getItem('mindful_tax_settings');
-    return saved ? JSON.parse(saved) : {
-      salary: 3835,
-      rsr: 536.63,
-      commission: 2790.50,
-      project: 221000,
-      general: 387000,
-      loja: 0,
-      gratificacao: 0,
-      dependents: 0,
-      extraDiscounts: 0
-    };
   });
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('mindful_transactions');
@@ -114,10 +97,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('mindful_asset_categories', JSON.stringify(assetCategories));
   }, [assetCategories]);
-
-  useEffect(() => {
-    localStorage.setItem('mindful_tax_settings', JSON.stringify(taxSettings));
-  }, [taxSettings]);
 
   const undoLastAction = () => {
     if (!lastAction) return;
@@ -183,16 +162,6 @@ export default function App() {
             Metas
           </button>
           <button
-            onClick={() => setView('tax')}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-              view === 'tax' ? "bg-white text-amber-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
-            )}
-          >
-            <Calculator size={18} />
-            Cálculo IRPF
-          </button>
-          <button
             onClick={() => setView('portfolio')}
             className={cn(
               "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
@@ -240,12 +209,6 @@ export default function App() {
                 <CategorySettings 
                   categories={categories} 
                   setCategories={setCategories} 
-                />
-              )}
-              {view === 'tax' && (
-                <TaxCalculator 
-                  settings={taxSettings}
-                  setSettings={setTaxSettings}
                 />
               )}
               {view === 'portfolio' && (

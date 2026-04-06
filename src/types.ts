@@ -43,27 +43,16 @@ export interface Asset {
   id: string;
   type: string;
   ticker: string;
-  position: number;
-  note: 0 | 1 | 3 | 5 | 7 | 9 | 11;
+  price: number;
   quantity: number;
+  position: number; // calculated: price * quantity
+  note: 0 | 1 | 3 | 5 | 7 | 9 | 11;
   pyramid: 'BASE' | 'MEIO' | 'TOPO';
 }
 
 export interface AssetCategory {
   name: string;
   target: number; // percentage 0-100
-}
-
-export interface TaxSettings {
-  salary: number;
-  rsr: number;
-  commission: number;
-  project: number;
-  general: number;
-  loja: number;
-  gratificacao: number;
-  dependents: number;
-  extraDiscounts: number;
 }
 
 export const DEFAULT_CATEGORIES: Category[] = [

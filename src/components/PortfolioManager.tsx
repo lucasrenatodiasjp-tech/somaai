@@ -11,7 +11,10 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronUp,
-  Info
+  Info,
+  RefreshCw,
+  Settings2,
+  X
 } from 'lucide-react';
 import { Asset, AssetCategory, DEFAULT_ASSET_CATEGORIES } from '../types';
 import { cn, formatCurrency, formatPercent } from '../lib/utils';
@@ -38,14 +41,20 @@ export default function PortfolioManager({
 }: PortfolioManagerProps) {
   const [newAporte, setNewAporte] = useState<string>('4000');
   const [showAddAsset, setShowAddAsset] = useState(false);
+  const [showManageCategories, setShowManageCategories] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // New Asset Form State
   const [newType, setNewType] = useState(assetCategories[0]?.name || '');
   const [newTicker, setNewTicker] = useState('');
-  const [newPosition, setNewPosition] = useState('');
-  const [newNote, setNewNote] = useState<Asset['note']>(5);
+  const [newPrice, setNewPrice] = useState('');
   const [newQuantity, setNewQuantity] = useState('');
+  const [newNote, setNewNote] = useState<Asset['note']>(5);
   const [newPyramid, setNewPyramid] = useState<Asset['pyramid']>('MEIO');
+
+  // Manage Categories State
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatTarget, setNewCatTarget] = useState('');
 
   const totalInvested = useMemo(() => assets.reduce((acc, a) => acc + a.position, 0), [assets]);
 
@@ -68,15 +77,6 @@ export default function PortfolioManager({
     const aporteBrutoVal = parseFloat(newAporte) || 0;
     if (aporteBrutoVal <= 0) return [];
 
-    // 1. Calculate category allocations based on target percentages
-    // (Note: The user's formula seems to assume categories are already balanced or targets are used for the NEW aporte)
-    // The formula says: (PROCV(tk; 'Cálculo_ativos'!A:H; 8; FALSO) / SOMASE('Cálculo_ativos'!B:B; t; 'Cálculo_ativos'!H:H)) * PROCV(t; APORTE!A:F; 6; FALSO)
-    // This means: (Asset_Note / Category_Total_Notes) * Category_Target_Aporte
-    
-    const results: any[] = [];
-    let trocoGlobal = 0;
-
-    // First pass: Initial allocation and integer rounding
     const initialAllocations = assets.map(asset => {
       const cat = assetCategories.find(c => c.name === asset.type);
       const catTotalNotes = assets
@@ -86,7 +86,7 @@ export default function PortfolioManager({
       const catTargetAporte = (aporteBrutoVal * (cat?.target || 0)) / 100;
       const assetAporteBruto = catTotalNotes > 0 ? (asset.note / catTotalNotes) * catTargetAporte : 0;
       
-      const price = asset.quantity > 0 ? asset.position / asset.quantity : 0;
+      const price = asset.price;
       const isInteger = asset.type === 'Ações Nacionais' || asset.type === 'Fundos Imobiliários';
       
       let units = price > 0 ? assetAporteBruto / price : 0;
@@ -95,20 +95,20 @@ export default function PortfolioManager({
       if (isInteger && price > 0) {
         units = Math.floor(units);
         spent = units * price;
-        trocoGlobal += (assetAporteBruto - spent);
       }
 
       return {
         ...asset,
-        price,
         isInteger,
         initialUnits: units,
         initialSpent: spent,
-        weight: 0 // to be calculated
+        assetAporteBruto
       };
     });
 
-    // Second pass: Distribute trocoGlobal to fractional assets
+    const totalSpentInitial = initialAllocations.reduce((acc, a) => acc + a.initialSpent, 0);
+    let trocoGlobal = aporteBrutoVal - totalSpentInitial;
+
     const fractionalAssets = initialAllocations.filter(a => !a.isInteger && a.initialSpent > 0);
     const totalFractionalWeights = fractionalAssets.reduce((acc, a) => {
       const multiplier = a.pyramid === 'BASE' ? 1.5 : a.pyramid === 'TOPO' ? 0.5 : 1;
@@ -140,25 +140,64 @@ export default function PortfolioManager({
   }, [assets, assetCategories, newAporte]);
 
   const addAsset = () => {
-    if (!newTicker || !newPosition || !newQuantity) return;
+    if (!newTicker || !newPrice || !newQuantity) return;
+    const price = parseFloat(newPrice);
+    const quantity = parseFloat(newQuantity);
     const asset: Asset = {
       id: crypto.randomUUID(),
       type: newType,
       ticker: newTicker.toUpperCase(),
-      position: parseFloat(newPosition),
+      price,
+      quantity,
+      position: price * quantity,
       note: newNote,
-      quantity: parseFloat(newQuantity),
       pyramid: newPyramid
     };
     setAssets(prev => [...prev, asset]);
     setNewTicker('');
-    setNewPosition('');
+    setNewPrice('');
     setNewQuantity('');
     setShowAddAsset(false);
   };
 
   const removeAsset = (id: string) => {
     setAssets(prev => prev.filter(a => a.id !== id));
+  };
+
+  const refreshPrices = async () => {
+    setIsRefreshing(true);
+    // Simulate API call to fetch prices
+    // In a real app, you would fetch from an API like Yahoo Finance or Brapi
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    setAssets(prev => prev.map(asset => {
+      // Mock price change +/- 2%
+      const change = 1 + (Math.random() * 0.04 - 0.02);
+      const newPrice = asset.price * change;
+      return {
+        ...asset,
+        price: newPrice,
+        position: newPrice * asset.quantity
+      };
+    }));
+    setIsRefreshing(false);
+  };
+
+  const addCategory = () => {
+    if (!newCatName || !newCatTarget) return;
+    setAssetCategories(prev => [...prev, { name: newCatName, target: parseFloat(newCatTarget) }]);
+    setNewCatName('');
+    setNewCatTarget('');
+  };
+
+  const removeCategory = (name: string) => {
+    setAssetCategories(prev => prev.filter(c => c.name !== name));
+    // Also remove assets of this category? Or just leave them?
+    // User might want to reassign them.
+  };
+
+  const updateCategoryTarget = (name: string, target: number) => {
+    setAssetCategories(prev => prev.map(c => c.name === name ? { ...c, target } : c));
   };
 
   return (
@@ -176,9 +215,26 @@ export default function PortfolioManager({
                 <p className="text-xs text-slate-500 font-medium">Balanceamento inteligente baseado em notas e metas</p>
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Investido</p>
-              <h3 className="text-xl font-black text-indigo-600">{formatCurrency(totalInvested)}</h3>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={refreshPrices}
+                disabled={isRefreshing}
+                className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all disabled:opacity-50"
+                title="Atualizar Preços"
+              >
+                <RefreshCw size={20} className={cn(isRefreshing && "animate-spin")} />
+              </button>
+              <button
+                onClick={() => setShowManageCategories(true)}
+                className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+                title="Gerenciar Categorias"
+              >
+                <Settings2 size={20} />
+              </button>
+              <div className="text-right ml-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Investido</p>
+                <h3 className="text-xl font-black text-indigo-600">{formatCurrency(totalInvested)}</h3>
+              </div>
             </div>
           </div>
 
@@ -305,9 +361,10 @@ export default function PortfolioManager({
               <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                 <th className="px-4 py-2">Tipo</th>
                 <th className="px-4 py-2">Ticker</th>
+                <th className="px-4 py-2 text-right">Preço</th>
+                <th className="px-4 py-2 text-right">Qtd</th>
                 <th className="px-4 py-2 text-right">Posição</th>
                 <th className="px-4 py-2 text-center">Nota</th>
-                <th className="px-4 py-2 text-right">Qtd</th>
                 <th className="px-4 py-2 text-center">Pirâmide</th>
                 <th className="px-4 py-2"></th>
               </tr>
@@ -322,15 +379,18 @@ export default function PortfolioManager({
                     <span className="text-sm font-black text-slate-800">{asset.ticker}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <span className="text-sm font-bold text-slate-700">{formatCurrency(asset.position)}</span>
+                    <span className="text-sm font-bold text-slate-700">{formatCurrency(asset.price)}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <span className="text-xs font-medium text-slate-500">{asset.quantity}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <span className="text-sm font-black text-indigo-600">{formatCurrency(asset.position)}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 text-xs font-black">
                       {asset.note}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="text-xs font-medium text-slate-500">{asset.quantity}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className={cn(
@@ -372,7 +432,7 @@ export default function PortfolioManager({
                   onClick={() => setShowAddAsset(false)}
                   className="p-2 rounded-full hover:bg-slate-100 text-slate-400 transition-colors"
                 >
-                  <Plus size={24} className="rotate-45" />
+                  <X size={24} />
                 </button>
               </div>
 
@@ -393,13 +453,30 @@ export default function PortfolioManager({
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Ticker</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: ITSA4"
-                      value={newTicker}
-                      onChange={e => setNewTicker(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Ex: ITSA4"
+                        value={newTicker}
+                        onChange={e => setNewTicker(e.target.value)}
+                        className="flex-1 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!newTicker) return;
+                          setIsRefreshing(true);
+                          // Mock fetch for individual ticker
+                          await new Promise(resolve => setTimeout(resolve, 800));
+                          const mockPrice = 10 + Math.random() * 90;
+                          setNewPrice(mockPrice.toFixed(2));
+                          setIsRefreshing(false);
+                        }}
+                        className="p-3 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+                        title="Buscar Preço"
+                      >
+                        <RefreshCw size={18} className={cn(isRefreshing && "animate-spin")} />
+                      </button>
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Nota</label>
@@ -417,12 +494,12 @@ export default function PortfolioManager({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Posição (R$)</label>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Preço Atual (R$)</label>
                     <input
                       type="number"
                       placeholder="0,00"
-                      value={newPosition}
-                      onChange={e => setNewPosition(e.target.value)}
+                      value={newPrice}
+                      onChange={e => setNewPrice(e.target.value)}
                       className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none transition-all font-bold text-sm"
                     />
                   </div>
@@ -462,6 +539,86 @@ export default function PortfolioManager({
                 >
                   Confirmar Ativo
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Manage Categories Modal */}
+      <AnimatePresence>
+        {showManageCategories && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="glass w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-slate-800">Gerenciar Categorias</h3>
+                <button 
+                  onClick={() => setShowManageCategories(false)}
+                  className="p-2 rounded-full hover:bg-slate-100 text-slate-400 transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-6 flex flex-col gap-6">
+                <div className="flex flex-col gap-4">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Adicionar Nova Categoria</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <input
+                      type="text"
+                      placeholder="Nome"
+                      value={newCatName}
+                      onChange={e => setNewCatName(e.target.value)}
+                      className="sm:col-span-2 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none text-sm font-bold"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Meta %"
+                      value={newCatTarget}
+                      onChange={e => setNewCatTarget(e.target.value)}
+                      className="px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 focus:border-indigo-500 outline-none text-sm font-bold"
+                    />
+                  </div>
+                  <button
+                    onClick={addCategory}
+                    className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700 transition-all"
+                  >
+                    Adicionar Categoria
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Categorias Atuais</p>
+                  <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-2">
+                    {assetCategories.map(cat => (
+                      <div key={cat.name} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <span className="text-sm font-bold text-slate-700">{cat.name}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              value={cat.target}
+                              onChange={e => updateCategoryTarget(cat.name, parseFloat(e.target.value))}
+                              className="w-16 px-2 py-1 rounded-lg bg-white border border-slate-200 text-xs font-bold text-center"
+                            />
+                            <span className="text-xs font-bold text-slate-400">%</span>
+                          </div>
+                          <button
+                            onClick={() => removeCategory(cat.name)}
+                            className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </motion.div>
           </div>
