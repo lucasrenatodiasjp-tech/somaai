@@ -7,13 +7,12 @@ import {
   Plus, 
   TrendingUp, 
   TrendingDown,
-  Building2,
-  Home,
   ChevronLeft,
   ChevronRight,
   Undo2,
   Trash2,
-  PieChart as PieChartIcon
+  PieChart as PieChartIcon,
+  Calculator
 } from 'lucide-react';
 import { 
   BudgetMode, 
@@ -21,7 +20,11 @@ import {
   Transaction, 
   Income, 
   DEFAULT_CATEGORIES,
-  AnnualBudget
+  AnnualBudget,
+  Asset,
+  AssetCategory,
+  TaxSettings,
+  DEFAULT_ASSET_CATEGORIES
 } from './types';
 import { cn, formatCurrency, formatPercent } from './lib/utils';
 import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfYear, endOfYear } from 'date-fns';
@@ -31,13 +34,37 @@ import { ptBR } from 'date-fns/locale';
 import Dashboard from './components/Dashboard';
 import MonthlyView from './components/MonthlyView';
 import CategorySettings from './components/CategorySettings';
+import TaxCalculator from './components/TaxCalculator';
+import PortfolioManager from './components/PortfolioManager';
 
 export default function App() {
-  const [mode, setMode] = useState<BudgetMode>('domestic');
-  const [view, setView] = useState<'annual' | 'monthly' | 'settings'>('annual');
+  const [mode] = useState<BudgetMode>('domestic');
+  const [view, setView] = useState<'annual' | 'monthly' | 'settings' | 'tax' | 'portfolio'>('annual');
   const [categories, setCategories] = useState<Category[]>(() => {
     const saved = localStorage.getItem('mindful_categories');
     return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
+  });
+  const [assets, setAssets] = useState<Asset[]>(() => {
+    const saved = localStorage.getItem('mindful_assets');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [assetCategories, setAssetCategories] = useState<AssetCategory[]>(() => {
+    const saved = localStorage.getItem('mindful_asset_categories');
+    return saved ? JSON.parse(saved) : DEFAULT_ASSET_CATEGORIES;
+  });
+  const [taxSettings, setTaxSettings] = useState<TaxSettings>(() => {
+    const saved = localStorage.getItem('mindful_tax_settings');
+    return saved ? JSON.parse(saved) : {
+      salary: 3835,
+      rsr: 536.63,
+      commission: 2790.50,
+      project: 221000,
+      general: 387000,
+      loja: 0,
+      gratificacao: 0,
+      dependents: 0,
+      extraDiscounts: 0
+    };
   });
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('mindful_transactions');
@@ -80,9 +107,17 @@ export default function App() {
     localStorage.setItem('mindful_annual_budgets', JSON.stringify(annualBudgets));
   }, [annualBudgets]);
 
-  const toggleMode = () => {
-    setMode(prev => prev === 'domestic' ? 'business' : 'domestic');
-  };
+  useEffect(() => {
+    localStorage.setItem('mindful_assets', JSON.stringify(assets));
+  }, [assets]);
+
+  useEffect(() => {
+    localStorage.setItem('mindful_asset_categories', JSON.stringify(assetCategories));
+  }, [assetCategories]);
+
+  useEffect(() => {
+    localStorage.setItem('mindful_tax_settings', JSON.stringify(taxSettings));
+  }, [taxSettings]);
 
   const undoLastAction = () => {
     if (!lastAction) return;
@@ -106,36 +141,21 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-lg font-bold tracking-tight">Mindful Budget</h1>
-            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">
-              {mode === 'domestic' ? 'Pessoal' : 'Empresarial'}
-            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
-          <button
-            onClick={toggleMode}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all duration-300 shadow-sm",
-              mode === 'domestic' 
-                ? "bg-indigo-50 text-indigo-700 hover:bg-indigo-100" 
-                : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-            )}
-          >
-            {mode === 'domestic' ? <Home size={18} /> : <Building2 size={18} />}
-            <span className="hidden sm:inline">Alternar para {mode === 'domestic' ? 'Empresa' : 'Pessoal'}</span>
-          </button>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-8">
         {/* Navigation Tabs */}
-        <div className="flex p-1 bg-slate-200/50 rounded-xl self-start">
+        <div className="flex flex-wrap p-1 bg-slate-200/50 rounded-xl self-start gap-1">
           <button
             onClick={() => setView('annual')}
             className={cn(
-              "flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all",
+              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
               view === 'annual' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
             )}
           >
@@ -145,7 +165,7 @@ export default function App() {
           <button
             onClick={() => setView('monthly')}
             className={cn(
-              "flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all",
+              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
               view === 'monthly' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
             )}
           >
@@ -155,12 +175,32 @@ export default function App() {
           <button
             onClick={() => setView('settings')}
             className={cn(
-              "flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-all",
+              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
               view === 'settings' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
             )}
           >
             <Settings size={18} />
             Metas
+          </button>
+          <button
+            onClick={() => setView('tax')}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+              view === 'tax' ? "bg-white text-amber-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            )}
+          >
+            <Calculator size={18} />
+            Cálculo IRPF
+          </button>
+          <button
+            onClick={() => setView('portfolio')}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+              view === 'portfolio' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            )}
+          >
+            <PieChartIcon size={18} />
+            Carteira
           </button>
         </div>
 
@@ -168,7 +208,7 @@ export default function App() {
         <div className="flex-1">
           <AnimatePresence mode="wait">
             <motion.div
-              key={`${view}-${mode}`}
+              key={view}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -200,6 +240,20 @@ export default function App() {
                 <CategorySettings 
                   categories={categories} 
                   setCategories={setCategories} 
+                />
+              )}
+              {view === 'tax' && (
+                <TaxCalculator 
+                  settings={taxSettings}
+                  setSettings={setTaxSettings}
+                />
+              )}
+              {view === 'portfolio' && (
+                <PortfolioManager 
+                  assets={assets}
+                  setAssets={setAssets}
+                  assetCategories={assetCategories}
+                  setAssetCategories={setAssetCategories}
                 />
               )}
             </motion.div>

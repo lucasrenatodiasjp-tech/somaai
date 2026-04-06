@@ -1,4 +1,4 @@
-export type BudgetMode = 'domestic' | 'business';
+export type BudgetMode = 'domestic';
 
 export interface Category {
   id: string;
@@ -39,6 +39,33 @@ export interface Income {
   recurrentId?: string;
 }
 
+export interface Asset {
+  id: string;
+  type: string;
+  ticker: string;
+  position: number;
+  note: 0 | 1 | 3 | 5 | 7 | 9 | 11;
+  quantity: number;
+  pyramid: 'BASE' | 'MEIO' | 'TOPO';
+}
+
+export interface AssetCategory {
+  name: string;
+  target: number; // percentage 0-100
+}
+
+export interface TaxSettings {
+  salary: number;
+  rsr: number;
+  commission: number;
+  project: number;
+  general: number;
+  loja: number;
+  gratificacao: number;
+  dependents: number;
+  extraDiscounts: number;
+}
+
 export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'fixed', name: 'Custos Fixos', targetPercent: 40, color: '#3b82f6' },
   { id: 'leisure', name: 'Lazer', targetPercent: 5, color: '#f59e0b' },
@@ -46,4 +73,14 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'comfort', name: 'Conforto', targetPercent: 15, color: '#8b5cf6' },
   { id: 'investments', name: 'Investimentos', targetPercent: 20, color: '#ef4444' },
   { id: 'knowledge', name: 'Conhecimento', targetPercent: 5, color: '#06b6d4' },
+];
+
+export const DEFAULT_ASSET_CATEGORIES: AssetCategory[] = [
+  { name: 'Ações Internacionais', target: 10 },
+  { name: 'Ações Nacionais', target: 15 },
+  { name: 'Fundos Imobiliários', target: 7 },
+  { name: 'REITS', target: 0 },
+  { name: 'Criptomoedas', target: 3 },
+  { name: 'Renda Fixa', target: 65 },
+  { name: 'Renda Fixa Internacional', target: 0 },
 ];
